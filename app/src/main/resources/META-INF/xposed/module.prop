@@ -1,4 +1,4 @@
-version=1.0.0
+version=1.6.14
 entry=java
 minApiVersion=102
 targetApiVersion=102
