@@ -11,7 +11,7 @@ plugins {
     alias(libs.plugins.lsplugin.cmaker)
 }
 
-val appVerCode = jgit.repo()?.commitCount("refs/remotes/origin/master") ?: 0
+val appVerCode = jgit.repo()?.commitCount("HEAD") ?: 0
 val appVerName: String by rootProject
 
 apksign {
@@ -102,6 +102,7 @@ android {
     packaging {
         resources {
             excludes += "**"
+            merges += "META-INF/xposed/*"
         }
     }
 
@@ -151,6 +152,8 @@ configurations.all {
 
 dependencies {
     compileOnly(libs.xposed)
+    compileOnly(libs.xposed.annotation)
+    implementation(libs.xposed.service)
     implementation(libs.protobuf.kotlin)
     implementation(libs.protobuf.java)
     compileOnly(libs.protobuf.protoc)

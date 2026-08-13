@@ -5,8 +5,8 @@ package me.iacn.biliroaming.utils
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
-import de.robv.android.xposed.XposedBridge
 import me.iacn.biliroaming.BiliBiliPackage
+import me.iacn.biliroaming.XposedInit
 import me.iacn.biliroaming.Constant.TAG
 import android.util.Log as ALog
 
@@ -18,11 +18,10 @@ object Log {
     fun toast(msg: String, force: Boolean = false, duration: Int = Toast.LENGTH_SHORT, alsoLog: Boolean = true) {
         if (!force && !sPrefs.getBoolean("show_info", true)) return
         handler.post {
-            val inst = runCatchingOrNull { BiliBiliPackage.instance } ?: return@post
-            inst.toastHelperClass?.runCatchingOrNull {
-                callStaticMethod(inst.cancelShowToast())
+            BiliBiliPackage.instance.toastHelperClass?.runCatchingOrNull {
+                callStaticMethod(BiliBiliPackage.instance.cancelShowToast())
                 callStaticMethod(
-                    inst.showToast(),
+                    BiliBiliPackage.instance.showToast(),
                     currentContext,
                     "哔哩漫游：$msg",
                     duration
@@ -56,7 +55,7 @@ object Log {
         } else {
             f(TAG, str)
             if (toXposed)
-                XposedBridge.log("$TAG : $str")
+                XposedInit.instance.log(ALog.ERROR, TAG, str)
         }
     }
 

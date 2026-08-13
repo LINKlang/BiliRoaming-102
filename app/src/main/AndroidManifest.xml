@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <uses-sdk tools:overrideLibrary="io.github.libxposed.service" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -42,18 +44,9 @@
         </activity>
 
         <meta-data
-            android:name="xposedmodule"
-            android:value="true" />
-        <meta-data
             android:name="xposeddescription"
             android:value="@string/xposed_description" />
-        <meta-data
-            android:name="xposedminversion"
-            android:value="53" />
 
-        <meta-data
-            android:name="xposedscope"
-            android:resource="@array/xposed_scope" />
     </application>
 
 </manifest>

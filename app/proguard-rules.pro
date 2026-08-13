@@ -1,7 +1,9 @@
 -repackageclasses "biliroaming"
 
--keep class me.iacn.biliroaming.XposedInit {
-    <init>();
+-dontwarn io.github.libxposed.annotation.**
+-adaptresourcefilecontents META-INF/xposed/java_init.list
+-keep,allowoptimization,allowobfuscation public class * extends io.github.libxposed.api.XposedModule {
+    public <init>();
 }
 
 -keepclassmembers class * extends com.google.protobuf.GeneratedMessageLite {
