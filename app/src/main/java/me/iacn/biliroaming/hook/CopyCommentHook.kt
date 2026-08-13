@@ -1,10 +1,12 @@
 package me.iacn.biliroaming.hook
 
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.view.View
 import android.widget.TextView
+import android.widget.Toast
 import me.iacn.biliroaming.utils.currentContext
 import me.iacn.biliroaming.utils.getResId
 import me.iacn.biliroaming.utils.hookMethod
@@ -29,13 +31,20 @@ class CopyCommentHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             val clipboard =
                 currentContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             // 实在是找不到了。那你就说有没有获取到吧
-            val txt = clipboard.primaryClip!!.getItemAt(0).text
+            val txt = clipboard.primaryClip?.getItemAt(0)?.text ?: return@hookMethod result
             AlertDialog.Builder(view.context, getResId("AppTheme.Dialog.Alert", "style"))
                 .run {
                     setTitle("自由复制内容")
                     setMessage(txt)
                     setPositiveButton("完成") { _, _ -> }
-                    setNegativeButton("复制全部") { _, _ -> }
+                    setNegativeButton("复制全部") { _, _ ->
+                        clipboard.primaryClip = ClipData.newPlainText("comment", txt)
+                        Toast.makeText(
+                            view.context,
+                            "已复制全部内容",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                     show()
                 }.apply {
                     findViewById<TextView>(android.R.id.message).setTextIsSelectable(true)
