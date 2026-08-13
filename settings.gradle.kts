@@ -1,5 +1,4 @@
 include(":app")
-buildCache { local { removeUnusedEntriesAfterDays = 1 } }
 pluginManagement {
     repositories {
         google()

@@ -1,18 +1,18 @@
 [versions]
 protobuf = "4.30.2"
 coroutine = "1.10.2"
-kotlin = "2.1.20"
+kotlin = "2.2.20"
 okhttp = "5.3.2"
 
 [plugins]
 kotlin = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
-agp-app = { id = "com.android.application", version = "8.9.1" }
-protobuf = { id = "com.google.protobuf", version = "0.9.5" }
+agp-app = { id = "com.android.application", version = "9.2.1" }
+protobuf = { id = "com.google.protobuf", version = "0.10.0" }
 lsplugin-jgit = { id = "org.lsposed.lsplugin.jgit", version = "1.1" }
 lsplugin-resopt = { id = "org.lsposed.lsplugin.resopt", version = "1.6" }
 lsplugin-apksign = { id = "org.lsposed.lsplugin.apksign", version = "1.4" }
 lsplugin-apktransform = { id = "org.lsposed.lsplugin.apktransform", version = "1.2" }
-lsplugin-cmaker = { id = "org.lsposed.lsplugin.cmaker", version = "1.2" }
+lsplugin-cmaker = { id = "org.lsposed.lsplugin.cmaker", version = "1.4" }
 
 [libraries]
 xposed = { module = "io.github.libxposed:api", version = "102.0.0" }

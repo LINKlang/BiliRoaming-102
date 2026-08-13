@@ -2,7 +2,6 @@ import com.google.protobuf.gradle.*
 
 plugins {
     alias(libs.plugins.agp.app)
-    alias(libs.plugins.kotlin)
     alias(libs.plugins.protobuf)
     alias(libs.plugins.lsplugin.resopt)
     alias(libs.plugins.lsplugin.jgit)
@@ -50,8 +49,8 @@ cmaker {
 
 android {
     namespace = "me.iacn.biliroaming"
-    compileSdk = 35
-    buildToolsVersion = "35.0.0"
+    compileSdk = 37
+    buildToolsVersion = "36.0.0"
     ndkVersion = "29.0.14206865"
 
     buildFeatures {
@@ -61,7 +60,7 @@ android {
 
     defaultConfig {
         applicationId = "me.iacn.biliroaming"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 35  // Target Android U
         versionCode = appVerCode
         versionName = appVerName
@@ -81,14 +80,16 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    kotlinOptions {
-        jvmTarget = "11"
-        freeCompilerArgs = listOf(
-            "-Xno-param-assertions",
-            "-Xno-call-assertions",
-            "-Xno-receiver-assertions",
-            "-language-version=2.0",
-        )
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+            freeCompilerArgs.addAll(
+                "-Xno-param-assertions",
+                "-Xno-call-assertions",
+                "-Xno-receiver-assertions",
+                "-language-version=2.0",
+            )
+        }
     }
 
     sourceSets {
@@ -159,7 +160,6 @@ dependencies {
     implementation(libs.protobuf.kotlin)
     implementation(libs.protobuf.java)
     compileOnly(libs.protobuf.protoc)
-    implementation(libs.kotlin.stdlib)
     implementation(libs.kotlin.coroutines.android)
     implementation(libs.kotlin.coroutines.jdk)
     implementation(libs.androidx.documentfile)
@@ -167,25 +167,34 @@ dependencies {
     implementation(libs.okhttp)
 }
 
-val adbExecutable: String = androidComponents.sdkComponents.adb.get().asFile.absolutePath
+fun adbPath(): String {
+    val sdkDir = System.getenv("ANDROID_HOME")
+        ?: System.getenv("ANDROID_SDK_ROOT")
+        ?: rootProject.file("local.properties").takeIf { it.exists() }
+            ?.readLines()?.firstOrNull { it.startsWith("sdk.dir=") }?.substringAfter('=')
+    requireNotNull(sdkDir) { "找不到 Android SDK：請設定 ANDROID_HOME 或 local.properties 的 sdk.dir" }
+    val isWindows = System.getProperty("os.name").startsWith("Windows")
+    return File(sdkDir, "platform-tools/adb${if (isWindows) ".exe" else ""}").absolutePath
+}
 
-val restartBiliBili = task("restartBiliBili").apply {
+val restartBiliBili = tasks.register("restartBiliBili") {
     doLast {
-        exec {
-            commandLine(adbExecutable, "shell", "am", "force-stop", "tv.danmaku.bili")
-        }
-        exec {
-            commandLine(
-                adbExecutable,
-                "shell",
-                "am",
-                "start",
-                "$(pm resolve-activity --components tv.danmaku.bili)"
-            )
-        }
+        val adb = adbPath()
+        ProcessBuilder(adb, "shell", "am", "force-stop", "tv.danmaku.bili")
+            .inheritIO().start().waitFor()
+        ProcessBuilder(
+            adb,
+            "shell",
+            "am",
+            "start",
+            "-n",
+            "\$(pm resolve-activity --components tv.danmaku.bili)"
+        ).inheritIO().start().waitFor()
     }
 }
 
 afterEvaluate {
-    tasks.getByPath("installDebug").finalizedBy(restartBiliBili)
+    tasks.matching { it.name == "installDebug" }.configureEach {
+        finalizedBy(restartBiliBili)
+    }
 }
