@@ -3,7 +3,6 @@
 package me.iacn.biliroaming
 
 import android.app.Activity
-import android.app.AndroidAppHelper
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
@@ -220,7 +219,7 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     val biliAccounts by lazy {
         biliAccountsClass?.callStaticMethodOrNull(
             mHookInfo.biliAccounts.get.orNull,
-            AndroidAppHelper.currentApplication()
+            currentContext
         )
     }
 
@@ -395,7 +394,7 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
             val t = measureTimeMillis {
                 if (hookInfoFile.isFile && hookInfoFile.canRead()) {
                     val lastUpdateTime = context.packageManager.getPackageInfo(
-                        AndroidAppHelper.currentPackageName(),
+                        packageName,
                         0
                     ).lastUpdateTime
                     val lastModuleUpdateTime = try {
@@ -498,7 +497,7 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
 
             lastUpdateTime = max(
                 context.packageManager.getPackageInfo(
-                    AndroidAppHelper.currentPackageName(),
+                    packageName,
                     0
                 ).lastUpdateTime,
                 runCatchingOrNull {

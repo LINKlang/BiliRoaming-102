@@ -21,10 +21,10 @@ class CopyCommentHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             "com.bilibili.app.comment3.data.model.CommentItem\$MenuItem",
             "android.view.View",  // ConstraintLayout
         ) { chain ->
-            chain.proceed()
+            val result = chain.proceed()
             val menu = chain.args[1]
             val view = chain.args[2] as View
-            if (!menu.toString().contains("COPY")) return@hookMethod
+            if (!menu.toString().contains("COPY")) return@hookMethod result
 
             val clipboard =
                 currentContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -40,6 +40,7 @@ class CopyCommentHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 }.apply {
                     findViewById<TextView>(android.R.id.message).setTextIsSelectable(true)
                 }
+            result
         }
     }
 }
