@@ -38,7 +38,7 @@ class CopyCommentHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     setMessage(txt)
                     setPositiveButton("完成") { _, _ -> }
                     setNegativeButton("复制全部") { _, _ ->
-                        clipboard.primaryClip = ClipData.newPlainText("comment", txt)
+                        clipboard.setPrimaryClip(ClipData.newPlainText("comment", txt))
                         Toast.makeText(
                             view.context,
                             "已复制全部内容",
