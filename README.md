@@ -29,6 +29,38 @@ An Xposed module that unblocks bangumi area limit of BILIBILI, and miscellaneous
 - 已 Root 之 Android 裝置，安裝支援 libxposed 的 **LSPosed**（libxposed 為其內建功能，無需額外安裝）
 - 框架須提供 libxposed API ≥ 102
 
+## 建置 / Building
+
+本善終版已將建置工具鏈升級至官方 libxposed 範本同世代，以支援 xposed-service 內含的 Java record：
+
+| 需求 | 版本 |
+|---|---|
+| JDK | 17+（實測 21） |
+| Android Gradle Plugin | 9.2.1（wrapper 自動） |
+| Gradle | 9.4.1（wrapper 自動） |
+| compileSdk / Build Tools | 37 / 36.0.0 |
+| NDK | 29（dex_builder 原生模組所需） |
+
+```bash
+# Windows（git-bash）：
+export JAVA_HOME="C:\Program Files\Android\openjdk\jdk-21.0.8"
+./gradlew :app:assembleDebug        # debug APK
+./gradlew :app:assembleRelease      # release APK（R8 + resopt）
+```
+
+注意事項：
+
+1. **SDK 37 平台目錄名**：部分新版 sdkmanager 會把 platform 裝成 `platforms/android-37.0`，且其 `package.xml` 使用 AGP 9.2 不支援的新 schema，導致 `UnmarshalException`。請將目錄改名為 `android-37`，並將 `package.xml` 的 `localPackage path` 改為 `platforms;android-37`（或參考已修正的安裝）。
+2. **簽名**：release 預設以 Android debug key 簽名。正式發行請在 `app/keystore.properties` 提供 `storeFile`/`storePassword`/`keyAlias`/`keyPassword`。
+3. 產物：release APK 位於 `app/release/BiliRoaming_<版本>.apk`（版本號見 `gradle.properties` 的 `appVerName`）。
+
+## 下載 / Download
+
+> 本倉庫暫無公開下載管道；請自行建置（見上），或使用上游歷史版本（已不再維護）：
+
+- https://github.com/yujincheng08/BiliRoaming/releases/latest
+- https://modules.lsposed.org/module/me.iacn.biliroaming
+
 # 支持以下功能
 
 - 解除B站番剧区域限制
@@ -62,11 +94,6 @@ An Xposed module that unblocks bangumi area limit of BILIBILI, and miscellaneous
 - ~Change music notification style to Primitive~
 - Extra covers from videos and live rooms
 - Customized splash images
-
-# download/下载
-https://github.com/yujincheng08/BiliRoaming/releases/latest
-
-https://modules.lsposed.org/module/me.iacn.biliroaming
 
 # 使用方法
 https://github.com/yujincheng08/BiliRoaming/wiki#%E4%BD%BF%E7%94%A8%E6%96%B9%E6%B3%95
