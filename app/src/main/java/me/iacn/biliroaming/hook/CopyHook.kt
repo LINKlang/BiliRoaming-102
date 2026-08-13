@@ -10,9 +10,11 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.PopupWindow
 import android.widget.TextView
+import io.github.libxposed.api.XposedInterface
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.utils.*
 import org.json.JSONObject
+import java.lang.reflect.Method
 
 class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     companion object {
@@ -27,76 +29,96 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
     private val enhanceLongClickCopy = sPrefs.getBoolean("comment_copy_enhance", false)
 
+    // 非同步「复制全部」按鈕以反射 invoke 呼叫原方法時，防止 hook 重入的旗標
+    private var skipOriginalInvoke = false
+
+    private fun invokeOriginal(chain: XposedInterface.Chain) {
+        if (skipOriginalInvoke) return
+        skipOriginalInvoke = true
+        try {
+            (chain.executable as Method).invoke(chain.thisObject, *chain.args.toTypedArray())
+        } catch (e: Throwable) {
+            Log.e(e)
+        } finally {
+            skipOriginalInvoke = false
+        }
+    }
+
     override fun startHook() {
         if (!sPrefs.getBoolean("comment_copy", false)) return
         instance.descCopyView().zip(instance.descCopy()).forEach { p ->
             val clazz = p.first ?: return@forEach
             val method = p.second ?: return@forEach
-            clazz.replaceMethod(
+            clazz.hookMethod(
                 method,
                 View::class.java,
                 ClickableSpan::class.java
-            ) { param ->
-                if (!enhanceLongClickCopy) return@replaceMethod Unit
+            ) { chain ->
+                if (skipOriginalInvoke) return@hookMethod chain.proceed()
+                if (!enhanceLongClickCopy) return@hookMethod Unit
 
-                param.thisObject.getFirstFieldByExactTypeOrNull<SpannableStringBuilder>()?.let {
-                    val view = param.args[0] as View
-                    showCopyDialog(view.context, it, param)
-                } ?: (param.args[0] as? TextView)?.let { tv ->
-                    showCopyDialog(tv.context, tv.text, param)
+                chain.thisObject!!.getFirstFieldByExactTypeOrNull<SpannableStringBuilder>()?.let {
+                    val view = chain.args[0] as View
+                    showCopyDialog(view.context, it, chain)
+                } ?: (chain.args[0] as? TextView)?.let { tv ->
+                    showCopyDialog(tv.context, tv.text, chain)
                 }
+                Unit
             }
         }
 
         instance.dynamicDescHolderListeners().forEach { c ->
-            c?.replaceMethod("onLongClick", View::class.java) { param ->
+            c?.hookMethod("onLongClick", View::class.java) { chain ->
+                if (skipOriginalInvoke) return@hookMethod chain.proceed()
                 if (!enhanceLongClickCopy)
-                    return@replaceMethod true
-                val itemView = param.args[0] as? View
+                    return@hookMethod true
+                val itemView = chain.args[0] as? View
                 DYNAMIC_COPYABLE_IDS.asSequence().firstNotNullOfOrNull { n ->
                     getId(n).takeIf { it != 0 }?.let { itemView?.findViewById<TextView>(it) }
                 }?.let { v ->
                     (if (instance.ellipsizingTextViewClass?.isInstance(v) == true) {
                         v.getFirstFieldByExactTypeOrNull()
                     } else v.text)?.also { text ->
-                        showCopyDialog(v.context, text, param)
+                        showCopyDialog(v.context, text, chain)
                     }
                 } ?: Log.toast("找不到动态内容", true)
                 true
             }
         }
 
-        val commentCopyHook = fun(param: MethodHookParam, idName: String): Any? {
+        val commentCopyHook = fun(chain: XposedInterface.Chain, idName: String): Any? {
+            if (skipOriginalInvoke) return chain.proceed()
             if (!enhanceLongClickCopy) return true
-            if (param.args[0] is FrameLayout) return param.invokeOriginalMethod()
-            (param.args[0] as? View)?.findViewById<View>(getId(idName))?.let {
+            if (chain.args[0] is FrameLayout) return chain.proceed()
+            (chain.args[0] as? View)?.findViewById<View>(getId(idName))?.let {
                 if (instance.commentSpanTextViewClass?.isInstance(it) == true ||
                     instance.commentSpanEllipsisTextViewClass?.isInstance(it) == true
                 ) it else null
             }?.let { view ->
                 view.getFirstFieldByExactTypeOrNull<CharSequence>()?.also { text ->
-                    showCopyDialog(view.context, text, param)
+                    showCopyDialog(view.context, text, chain)
                 }
             } ?: Log.toast("找不到评论内容", true)
             return true
         }
-        instance.commentCopyClass?.replaceMethod("onLongClick", View::class.java) {
-            commentCopyHook(it, "message")
+        instance.commentCopyClass?.hookMethod("onLongClick", View::class.java) { chain ->
+            commentCopyHook(chain, "message")
         }
-        instance.commentCopyNewClass?.replaceMethod("onLongClick", View::class.java) {
-            commentCopyHook(it, "comment_message")
+        instance.commentCopyNewClass?.hookMethod("onLongClick", View::class.java) { chain ->
+            commentCopyHook(chain, "comment_message")
         }
 
         instance.comment3CopyClass?.let { c ->
             instance.comment3Copy()?.let { m ->
                 instance.comment3ViewIndex().let { i ->
-                    c.replaceAllMethods(m) { param ->
-                        if (!enhanceLongClickCopy) return@replaceAllMethods true
-                        val view = param.args[i] as View
+                    c.hookAllMethods(m) { chain ->
+                        if (skipOriginalInvoke) return@hookAllMethods chain.proceed()
+                        if (!enhanceLongClickCopy) return@hookAllMethods true
+                        val view = chain.args[i] as View
                         view.getFirstFieldByExactTypeOrNull<CharSequence>()?.also { text ->
-                            showCopyDialog(view.context, text, param)
+                            showCopyDialog(view.context, text, chain)
                         }
-                        return@replaceAllMethods true
+                        return@hookAllMethods true
                     }
                 }
             }
@@ -123,42 +145,43 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }.ifEmpty { null }
         }
 
-        hookMethod.hookBeforeMethod { param ->
+        hookMethod.hookMethod { chain ->
+            if (skipOriginalInvoke) return@hookMethod chain.proceed()
             // Repost guard: last arg == first arg
-            if (param.args.size >= 2 && param.args.last() != param.args.first()) return@hookBeforeMethod
+            if (chain.args.size >= 2 && chain.args.last() != chain.args.first()) return@hookMethod chain.proceed()
 
-            val hostClass = param.thisObject.javaClass
+            val hostClass = chain.thisObject!!.javaClass
 
             // Activity: try this first, then search for captured field
-            val activity = (param.thisObject as? Activity)
+            val activity = (chain.thisObject as? Activity)
                 ?: hostClass.declaredFields.find {
                     Activity::class.java.isAssignableFrom(it.type)
-                }?.apply { isAccessible = true }?.get(param.thisObject) as? Activity
-                ?: return@hookBeforeMethod
+                }?.apply { isAccessible = true }?.get(chain.thisObject!!) as? Activity
+                ?: return@hookMethod chain.proceed()
 
             // Typed message: try args[1] first, then search for field with getContentString
-            val typedMsg = param.args.getOrNull(1)
+            val typedMsg = chain.args.getOrNull(1)
                 ?: hostClass.declaredFields.find {
                     runCatching { it.type.getMethod(contentStringName) }.isSuccess
-                }?.apply { isAccessible = true }?.get(param.thisObject)
-                ?: return@hookBeforeMethod
+                }?.apply { isAccessible = true }?.get(chain.thisObject!!)
+                ?: return@hookMethod chain.proceed()
 
-            val json = typedMsg.callMethodOrNullAs<String>(contentStringName) ?: return@hookBeforeMethod
-            val text = parseContentText(json) ?: return@hookBeforeMethod
-            showCopyDialog(activity, text, param)
+            val json = typedMsg.callMethodOrNullAs<String>(contentStringName) ?: return@hookMethod chain.proceed()
+            val text = parseContentText(json) ?: return@hookMethod chain.proceed()
+            showCopyDialog(activity, text, chain)
 
             // Dismiss popup: try args[6] first, then search for PopupWindow field
-            (param.args.getOrNull(6)
+            (chain.args.getOrNull(6)
                 ?: hostClass.declaredFields.find {
                     PopupWindow::class.java.isAssignableFrom(it.type)
-                }?.apply { isAccessible = true }?.get(param.thisObject))
+                }?.apply { isAccessible = true }?.get(chain.thisObject!!))
                 ?.callMethodOrNull("dismiss")
 
-            param.result = null
+            null
         }
     }
 
-    private fun showCopyDialog(context: Context, text: CharSequence, param: MethodHookParam) {
+    private fun showCopyDialog(context: Context, text: CharSequence, chain: XposedInterface.Chain) {
         val appDialogTheme = getResId("AppTheme.Dialog.Alert", "style")
         AlertDialog.Builder(context, appDialogTheme).run {
             setTitle("自由复制内容")
@@ -175,7 +198,7 @@ class CopyHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 )
             }
             setNeutralButton("复制全部") { _, _ ->
-                param.invokeOriginalMethod()
+                invokeOriginal(chain)
             }
             setNegativeButton(android.R.string.cancel, null)
             show()

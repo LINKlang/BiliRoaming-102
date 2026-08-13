@@ -10,8 +10,7 @@ import me.iacn.biliroaming.utils.Log
 import me.iacn.biliroaming.utils.av2bv
 import me.iacn.biliroaming.utils.callMethod
 import me.iacn.biliroaming.utils.callMethodAs
-import me.iacn.biliroaming.utils.hookAfterMethod
-import me.iacn.biliroaming.utils.hookBeforeMethod
+import me.iacn.biliroaming.utils.hookMethod
 import me.iacn.biliroaming.utils.mossResponseHandlerReplaceProxy
 import me.iacn.biliroaming.utils.sPrefs
 import java.lang.ref.WeakReference
@@ -33,27 +32,28 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
         Log.d("startHook: SkipVideoAd")
 
         instance.playerMossClass?.apply {
-            hookBeforeMethod("executePlayViewUnite",
+            hookMethod("executePlayViewUnite",
                 instance.playViewUniteReqClass
-            ) { param ->
-                val req = param.args[0]
+            ) { chain ->
+                val req = chain.args[0]!!
                 bvid = req.callMethodAs("getBvid")
-                val vod = req.callMethod("getVod")?:return@hookBeforeMethod
+                val vod = req.callMethod("getVod")?:return@hookMethod chain.proceed()
                 if (bvid.isEmpty()){
                     val aid = vod.callMethodAs<Long>("getAid")
                     if (aid==-1L){
-                        return@hookBeforeMethod
+                        return@hookMethod chain.proceed()
                     }
                     bvid = av2bv(aid)
                 }
                 cid = vod.callMethodAs<Long>("getCid").toString()
+                chain.proceed()
             }
 
-            hookBeforeMethod("playViewUnite",
+            hookMethod("playViewUnite",
                 instance.playViewUniteReqClass,
                 instance.mossResponseHandlerClass
-            ){ param ->
-                param.args[1] = param.args[1].mossResponseHandlerReplaceProxy { reply ->
+            ){ chain ->
+                chain.args[1] = chain.args[1]!!.mossResponseHandlerReplaceProxy { reply ->
                     reply ?: return@mossResponseHandlerReplaceProxy null
                     val playArc = reply.callMethod("getPlayArc")?:return@mossResponseHandlerReplaceProxy null
                     cid = playArc.callMethodAs<Long>("getCid").toString()
@@ -64,13 +64,15 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
                     bvid = av2bv(aid)
                     null
                 }
+                chain.proceed()
             }
         }
 
         instance.playerCoreServiceV2Class?.apply {
-            hookAfterMethod("G1", Int::class.java) { param ->
-                playerRef = WeakReference(param.thisObject)
-                val state = param.args[0] as Int
+            hookMethod("G1", Int::class.java) { chain ->
+                val result = chain.proceed()
+                playerRef = WeakReference(chain.thisObject!!)
+                val state = chain.args[0] as Int
                 if (state in 3..5 && duration<=0) {
                     duration = (player?.callMethodAs<Int>("getDuration") ?: -1)
                 }
@@ -96,14 +98,17 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
 
                     }
                 }
+                result
             }
 
-            hookAfterMethod("getCurrentPosition") { param ->
+            hookMethod("getCurrentPosition") { chain ->
+                val result = chain.proceed()
                 val now = System.currentTimeMillis()
                 if (now - lastSeekTime > waitTime) {
                     lastSeekTime = now
-                    waitTime = if(seekTo(param.result as Int)) 3000 else 1000
+                    waitTime = if(seekTo(result as Int)) 3000 else 1000
                 }
+                result
             }
         }
     }
@@ -127,6 +132,3 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
         return false
     }
 }
-
-
-

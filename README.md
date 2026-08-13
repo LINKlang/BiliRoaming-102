@@ -19,6 +19,16 @@ An Xposed module that unblocks bangumi area limit of BILIBILI, and miscellaneous
 
 </div>
 
+# 維護狀態 / Maintenance Status
+
+> 上游 [BiliRoaming](https://github.com/yujincheng08/BiliRoaming) 已停止維護。本倉庫為善終版：完整移植至 **libxposed API 102**，並補完開發到一半的功能、修復既有 Bug。不保證與未來 B 站新版本相容。
+
+> The upstream project has ceased maintenance. This repository is the final maintenance release: fully ported to **libxposed API 102**, with half-finished features completed and known bugs fixed. Compatibility with future bilibili app versions is not guaranteed.
+
+## 系統需求 / Requirements
+- 已 Root 之 Android 裝置，安裝支援 libxposed 的 **LSPosed**（libxposed 為其內建功能，無需額外安裝）
+- 框架須提供 libxposed API ≥ 102
+
 # 支持以下功能
 
 - 解除B站番剧区域限制

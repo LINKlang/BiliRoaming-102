@@ -40,25 +40,26 @@ class WebViewHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
     override fun startHook() {
         Log.d("startHook: WebView")
-        WebView::class.java.hookBeforeMethod(
+        WebView::class.java.hookMethod(
             "setWebViewClient", WebViewClient::class.java
-        ) { param ->
-            val clazz = param.args[0].javaClass
-            (param.thisObject as WebView).addJavascriptInterface(jsHooker, "hooker")
-            if (hookedClient.contains(clazz)) return@hookBeforeMethod
+        ) { chain ->
+            val clazz = chain.args[0]!!.javaClass
+            (chain.thisObject as WebView).addJavascriptInterface(jsHooker, "hooker")
+            if (hookedClient.contains(clazz)) return@hookMethod chain.proceed()
             try {
                 clazz.getDeclaredMethod(
                     "onPageStarted",
                     WebView::class.java, String::class.java, Bitmap::class.java
-                ).hookBeforeMethod { p ->
+                ).hookMethod { p ->
                     val webView = p.args[0] as WebView
                     webView.evaluateJavascript("""(function(){$js})()""".trimMargin(), null)
+                    p.proceed()
                 }
                 if (sPrefs.getBoolean("save_comment_image", false)) {
                     clazz.getDeclaredMethod(
                         "onPageFinished",
                         WebView::class.java, String::class.java
-                    ).hookBeforeMethod { p ->
+                    ).hookMethod { p ->
                         val webView = p.args[0] as WebView
                         val url = p.args[1] as String
                         if (url.startsWith("https://www.bilibili.com/h5/note-app/view")) {
@@ -67,12 +68,14 @@ class WebViewHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                                 null
                             )
                         }
+                        p.proceed()
                     }
                 }
                 hookedClient.add(clazz)
                 Log.d("hook webview $clazz")
             } catch (_: NoSuchMethodException) {
             }
+            chain.proceed()
         }
     }
 
