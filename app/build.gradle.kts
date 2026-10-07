@@ -37,6 +37,7 @@ cmaker {
             "-DANDROID_STL=none",
             "-DCMAKE_CXX_STANDARD=23",
             "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
+            "-DCMAKE_MAKE_PROGRAM=D:/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
         )
         cFlags += "-flto"
         cppFlags += "-flto"
@@ -51,7 +52,7 @@ android {
     namespace = "me.iacn.biliroaming"
     compileSdk = 37
     buildToolsVersion = "36.0.0"
-    ndkVersion = "29.0.14206865"
+    ndkVersion = "30.0.16248370"
 
     buildFeatures {
         prefab = true

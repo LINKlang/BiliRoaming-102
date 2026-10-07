@@ -91,7 +91,8 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         instance.settingRouterClass?.hookAllConstructors { chain ->
             if (chain.args[1] != SETTING_URI) return@hookAllConstructors chain.proceed()
             val routerType = (chain.executable as Constructor<*>).parameterTypes[3]
-            chain.args[3] = Proxy.newProxyInstance(
+            val args = chain.args.toTypedArray()
+            args[3] = Proxy.newProxyInstance(
                 routerType.classLoader,
                 arrayOf(routerType)
             ) { _, method, _ ->
@@ -114,7 +115,7 @@ class SettingHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     }
                 }
             }
-            chain.proceed()
+            chain.proceed(args)
         }
 
         // 8.97.0+: hook 菜单适配器 notify* 方法注入设置项

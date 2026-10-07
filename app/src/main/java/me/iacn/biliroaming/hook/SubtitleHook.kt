@@ -160,7 +160,8 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             instance.mossResponseHandlerClass
         ) { chain ->
             val dmViewReq = chain.args[0]!!
-            chain.args[1] = chain.args[1]!!.mossResponseHandlerReplaceProxy { dmViewReply ->
+            val args = chain.args.toTypedArray()
+            args[1] = args[1]!!.mossResponseHandlerReplaceProxy { dmViewReply ->
                 if (hidden && removeCmdDms) {
                     dmViewReply?.removeCmdDms()
                 }
@@ -168,7 +169,7 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     dmViewReply.hookSubtitleList(dmViewReq)
                 } else null
             }
-            chain.proceed()
+            chain.proceed(args)
         }
     }
 
@@ -222,8 +223,9 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         if (offset != 0) {
             arrayOf(instance.subtitleConfigGetClass, instance.subtitleConfigChangeClass).forEach {
                 it?.hookMethod("setBottomMargin", Float::class.javaObjectType) { chain ->
-                    chain.args[0] = (chain.args[0] as Float) + offset
-                    chain.proceed()
+                    val args = chain.args.toTypedArray()
+                    args[0] = (args[0] as Float) + offset
+                    chain.proceed(args)
                 }
             }
         }
@@ -310,10 +312,9 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             if (maxWidth != 0.0F) {
                 fillColorField.setInt(cronCanvas, fillColor)
                 strokeColorField.setInt(cronCanvas, strokeColor)
-                chain.args[3] = true
-                val result = chain.proceed()
-                chain.args[3] = false
-                result
+                val args = chain.args.toTypedArray()
+                args[3] = true
+                chain.proceed(args)
             } else {
                 chain.proceed()
             }
@@ -338,7 +339,8 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             if (url?.contains("zh_converter=t2cn") != true)
                 return@hookMethod chain.proceed()
             val parser = chain.args[0]!!
-            chain.args[0] = Proxy.newProxyInstance(
+            val args = chain.args.toTypedArray()
+            args[0] = Proxy.newProxyInstance(
                 parser.javaClass.classLoader,
                 arrayOf(instance.parserClass)
             ) { _, m, args ->
@@ -368,7 +370,7 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     ) ?: return@newProxyInstance m(parser, *args)
                 m(parser, responseBody)
             }
-            chain.proceed()
+            chain.proceed(args)
         }
     }
 

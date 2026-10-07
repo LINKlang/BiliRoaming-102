@@ -53,7 +53,8 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
                 instance.playViewUniteReqClass,
                 instance.mossResponseHandlerClass
             ){ chain ->
-                chain.args[1] = chain.args[1]!!.mossResponseHandlerReplaceProxy { reply ->
+                val args = chain.args.toTypedArray()
+                args[1] = args[1]!!.mossResponseHandlerReplaceProxy { reply ->
                     reply ?: return@mossResponseHandlerReplaceProxy null
                     val playArc = reply.callMethod("getPlayArc")?:return@mossResponseHandlerReplaceProxy null
                     cid = playArc.callMethodAs<Long>("getCid").toString()
@@ -64,7 +65,7 @@ class SkipVideoAd(classLoader: ClassLoader) : BaseHook(classLoader) {
                     bvid = av2bv(aid)
                     null
                 }
-                chain.proceed()
+                chain.proceed(args)
             }
         }
 

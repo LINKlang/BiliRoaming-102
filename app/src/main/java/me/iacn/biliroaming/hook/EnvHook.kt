@@ -52,7 +52,8 @@ class EnvHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 val delegate = chain.args.getOrNull(0) ?: return@hookAllConstructors chain.proceed()
                 val realConfig = chain.args.getOrNull(1) // may be null on 8.97.0+ (z12=true)
                 val delegateClass = delegate.javaClass
-                chain.args[0] = Proxy.newProxyInstance(
+                val args = chain.args.toTypedArray()
+                args[0] = Proxy.newProxyInstance(
                     delegateClass.classLoader,
                     delegateClass.interfaces
                 ) { _, m, a ->
@@ -72,13 +73,14 @@ class EnvHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         m(delegate, *args)
                     }
                 }
-                chain.proceed()
+                chain.proceed(args)
             }
 
 //        // Disable tinker
 //        "com.tencent.tinker.loader.app.TinkerApplication".findClass(mClassLoader)?.hookAllConstructors { chain ->
-//            chain.args[0] = 0
-//            chain.proceed()
+//            val args = chain.args.toTypedArray()
+//            args[0] = 0
+//            chain.proceed(args)
 //        }
     }
 

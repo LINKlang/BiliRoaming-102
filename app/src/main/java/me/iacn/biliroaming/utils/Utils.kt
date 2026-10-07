@@ -409,7 +409,12 @@ inline fun Any.mossResponseHandlerProxy(crossinline onNext: (reply: Any?) -> Uni
     ) { _, m, args ->
         if (m.name == "onNext") {
             val reply = args[0]
-            onNext(reply)
+            // This callback can run after the intercepted RPC has already returned.
+            try {
+                onNext(reply)
+            } catch (e: Throwable) {
+                Log.e(e)
+            }
             m(this, *args)
         } else if (args == null) {
             m(this)
@@ -426,12 +431,23 @@ inline fun Any.mossResponseHandlerReplaceProxy(crossinline onNext: (reply: Any?)
         arrayOf(instance.mossResponseHandlerClass)
     ) { _, m, args ->
         if (m.name == "onNext") {
-            onNext(args[0])?.let {
+            val replacement = try {
+                onNext(args[0])
+            } catch (e: Throwable) {
+                Log.e(e)
+                null
+            }
+            replacement?.let {
                 args[0] = it
             }
             m(this, *args)
         } else if (m.name == "onError") {
-            val newResponse = onNext(null)
+            val newResponse = try {
+                onNext(null)
+            } catch (e: Throwable) {
+                Log.e(e)
+                null
+            }
             if (newResponse == null) {
                 m(this, *args)
             } else {

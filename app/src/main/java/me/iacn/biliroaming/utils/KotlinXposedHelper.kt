@@ -136,13 +136,50 @@ private fun findConstructorBestMatch(clazz: Class<*>, argTypes: Array<Class<*>>)
     null
 }
 
+// Keep the last downstream outcome so a hook failure cannot replay an RPC or constructor.
+// Explicit proceed calls still execute normally; only error recovery reuses the outcome.
+@PublishedApi internal class ProceedTrackingChain(
+    private val chain: XposedInterface.Chain
+) : XposedInterface.Chain by chain {
+    private var outcome: Result<Any?>? = null
+
+    private inline fun recordProceed(block: () -> Any?): Any? {
+        val result = runCatching(block)
+        outcome = result
+        return result.getOrThrow()
+    }
+
+    override fun proceed(): Any? = recordProceed { chain.proceed() }
+
+    override fun proceed(args: Array<Any?>): Any? = recordProceed { chain.proceed(args) }
+
+    override fun proceedWith(thisObject: Any): Any? = recordProceed {
+        chain.proceedWith(thisObject)
+    }
+
+    override fun proceedWith(thisObject: Any, args: Array<Any?>): Any? = recordProceed {
+        chain.proceedWith(thisObject, args)
+    }
+
+    fun recover(error: Throwable): Any? {
+        val previous = outcome
+        // A downstream exception belongs to the original call, not to this hook.
+        if (previous?.exceptionOrNull() !== error) {
+            Log.e("Error occurred calling hooker on ${chain.executable}")
+            Log.e(error)
+        }
+        return if (previous == null) chain.proceed() else previous.getOrThrow()
+    }
+}
+
 @PublishedApi internal inline fun createHooker(crossinline callback: HookCallback) = object : XposedInterface.Hooker {
-    override fun intercept(chain: XposedInterface.Chain): Any? = try {
-        callback(chain)
-    } catch (e: Throwable) {
-        Log.e("Error occurred calling hooker on ${chain.executable}")
-        Log.e(e)
-        chain.proceed()
+    override fun intercept(chain: XposedInterface.Chain): Any? {
+        val trackedChain = ProceedTrackingChain(chain)
+        return try {
+            callback(trackedChain)
+        } catch (e: Throwable) {
+            trackedChain.recover(e)
+        }
     }
 }
 
