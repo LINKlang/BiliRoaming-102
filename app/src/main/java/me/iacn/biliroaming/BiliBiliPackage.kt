@@ -71,7 +71,10 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     val downloadThreadListenerClass by Weak { mHookInfo.downloadThread.listener from mClassLoader }
     val downloadThreadViewHostClass by Weak { mHookInfo.downloadThread.viewHost from mClassLoader }
     val reportDownloadThreadClass by Weak { mHookInfo.downloadThread.reportDownload.class_ from mClassLoader }
-    val libBiliClass by Weak { mHookInfo.signQuery.class_ from mClassLoader }
+    private val requestHooks by lazy {
+        NativeRequestHooks.resolve(mHookInfo, listOf(mClassLoader))
+    }
+    val libBiliClass get() = requestHooks.signQuery?.declaringClass
     val splashActivityClass by Weak {
         "tv.danmaku.bili.ui.splash.SplashActivity" from mClassLoader
             ?: "tv.danmaku.bili.MainActivityV2" from mClassLoader
@@ -115,7 +118,7 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     val shareClickResultClass by Weak { "com.bilibili.lib.sharewrapper.online.api.ShareClickResult" from mClassLoader }
     val kanbanCallbackClass by Weak { mHookInfo.kanBan.class_ from mClassLoader }
     val toastHelperClass by Weak { mHookInfo.toastHelper.class_ from mClassLoader }
-    val biliAccountsClass by Weak { mHookInfo.biliAccounts.class_ from mClassLoader }
+    val biliAccountsClass get() = requestHooks.getAccounts?.declaringClass
     val networkExceptionClass by Weak { "com.bilibili.lib.moss.api.NetworkException" from mClassLoader }
     val brotliInputStreamClass by Weak { mHookInfo.brotliInputStream from mClassLoader }
     val commentInvalidFragmentClass by Weak {
@@ -217,14 +220,13 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
     }
 
     val biliAccounts by lazy {
-        biliAccountsClass?.callStaticMethodOrNull(
-            mHookInfo.biliAccounts.get.orNull,
-            currentContext
-        )
+        runCatchingOrNull { requestHooks.getAccounts?.invoke(null, currentContext) }
     }
 
     val accessKey by lazy {
-        biliAccounts?.callMethodOrNullAs<String>(mHookInfo.biliAccounts.getAccessKey.orNull)
+        biliAccounts?.let { account ->
+            runCatchingOrNull { requestHooks.getAccessKey?.invoke(account) as? String }
+        }
     }
 
     val appKey by lazy {
@@ -243,7 +245,9 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
 
     fun columnColorArray() = mHookInfo.columnHelper.colorArray.orNull
 
-    fun signQueryName() = mHookInfo.signQuery.method.orNull
+    fun signQueryName() = requestHooks.signQuery?.name
+
+    fun signRequest(parameters: Map<String, String>): String = requestHooks.sign(parameters)
 
     fun skinList() = mHookInfo.skinList.orNull
 
@@ -411,16 +415,26 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
                         && BuildConfig.VERSION_CODE == info.moduleVersionCode
                         && BuildConfig.VERSION_NAME == info.moduleVersionName
                         && info.generation >= getModuleGeneration(context)
-                        && info.biliAccounts.getAccessKey.orNull != null
-                    )
-                        return info
+                    ) {
+                        if (NativeRequestHooks.resolve(info, listOf(mClassLoader)).matchesCache(info))
+                            return info
+                        Log.w("Hook 缓存缺少有效的原生签名或账号入口，重新扫描")
+                    }
                 }
             }
             Log.d("Read hook info completed: take $t ms")
         } catch (e: Throwable) {
             Log.w(e)
         }
-        return initHookInfo(context).also {
+        val scanned = initHookInfo(context, mClassLoader)
+        val nativeHooks = NativeRequestHooks.resolve(scanned, listOf(mClassLoader))
+        val repaired = nativeHooks.update(scanned)
+        Log.d("原生请求入口：sign=${nativeHooks.signQuery?.toGenericString()}, " +
+            "accounts=${nativeHooks.getAccounts?.toGenericString()}, " +
+            "accessKey=${nativeHooks.getAccessKey?.name}")
+        if (!nativeHooks.isComplete) Log.w("原生请求入口未完整恢复，不保存不完整 Hook 缓存")
+        return repaired.also {
+            if (!nativeHooks.isComplete) return@also
             try {
                 val hookInfoFile = File(context.cacheDir, Constant.HOOK_INFO_FILE_NAME)
                 if (hookInfoFile.exists()) hookInfoFile.delete()
@@ -466,9 +480,8 @@ class BiliBiliPackage constructor(private val mClassLoader: ClassLoader, mContex
         } catch (_: Exception) { 0 }
 
         @JvmStatic
-        fun initHookInfo(context: Context) = hookInfo {
-            val classloader = context.classLoader
-            val classesList = context.classLoader.allClassesList(::findRealClassloader).asSequence()
+        fun initHookInfo(context: Context, classloader: ClassLoader = context.classLoader) = hookInfo {
+            val classesList = classloader.allClassesList(::findRealClassloader).asSequence()
 
             try {
                 System.loadLibrary("biliroaming")

@@ -166,6 +166,7 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.cxx)
     implementation(libs.okhttp)
+    testImplementation("junit:junit:4.13.2")
 }
 
 fun adbPath(): String {

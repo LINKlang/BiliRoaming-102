@@ -80,7 +80,8 @@ object BiliRoamingApi {
             val query = mapOf(
                     "season_id" to seasonId.toString(),
             )
-            val content = getContent(Uri.Builder().scheme("https").encodedAuthority(BILI_SEASON_URL).encodedQuery(signQuery(query)).toString())
+            val signedQuery = signRequestOrNull(query) ?: return@run null
+            val content = getContent(Uri.Builder().scheme("https").encodedAuthority(BILI_SEASON_URL).encodedQuery(signedQuery).toString())
             content?.toJSONObject()?.optJSONObject("data")
         } ?: run {
             val content = getContent(Uri.Builder().scheme("https").encodedAuthority("${BILI_MEDIA_URL}${seasonId}").toString()) ?: return@run null
@@ -191,19 +192,16 @@ object BiliRoamingApi {
             return getThailandSearchBangumi(query, type)
         }
         val hostUrl = sPrefs.getString(area + "_server", null) ?: return null
+        val signedQuery = signRequestOrNull(query, mapOf(
+            "type" to type,
+            "build" to "6400000",
+            "area" to area,
+        )) ?: return null
         val uri = Uri.Builder()
             .scheme("https")
             .encodedAuthority(hostUrl)
             .encodedPath(BILI_SEARCH_URL)
-            .encodedQuery(
-                signQuery(
-                    query, mapOf(
-                        "type" to type,
-                        "build" to "6400000",
-                        "area" to area,
-                    )
-                )
-            )
+            .encodedQuery(signedQuery)
             .toString()
         return getContent(uri)
     }
@@ -211,31 +209,36 @@ object BiliRoamingApi {
     @JvmStatic
     fun getThailandSearchBangumi(query: Map<String, String>, type: String): String? {
         val thUrl = sPrefs.getString("th_server", null) ?: return null
+        val signedQuery = signRequestOrNull(query, mapOf(
+            "type" to type,
+            "appkey" to "7d089525d3611b1c",
+            "build" to "1001310",
+            "mobi_app" to "bstar_a",
+            "platform" to "android",
+            "s_locale" to "zh_SG",
+            "c_locale" to "zh_SG",
+            "sim_code" to "52004",
+            "lang" to "hans",
+        )) ?: return null
         val uri = Uri.Builder()
             .scheme("https")
             .encodedAuthority(thUrl)
             .encodedPath(THAILAND_PATH_SEARCH)
-            .encodedQuery(
-                signQuery(
-                    query, mapOf(
-                        "type" to type,
-                        "appkey" to "7d089525d3611b1c",
-                        "build" to "1001310",
-                        "mobi_app" to "bstar_a",
-                        "platform" to "android",
-                        "s_locale" to "zh_SG",
-                        "c_locale" to "zh_SG",
-                        "sim_code" to "52004",
-                        "lang" to "hans",
-                    )
-                )
-            )
+            .encodedQuery(signedQuery)
             .toString()
         return getContent(uri)?.replace(
             "bstar://bangumi/season/",
             "https://bangumi.bilibili.com/anime/"
         )
     }
+
+    private fun signRequestOrNull(query: Map<String, String>, extra: Map<String, String> = emptyMap()): String? =
+        try {
+            signQuery(query, extra)
+        } catch (e: NativeRequestHooks.SigningException) {
+            Log.toast(e.message ?: "B 站原生签名失败", alsoLog = true)
+            null
+        }
 
     @JvmStatic
     private fun fixPrevueSection(result: JSONObject) {
@@ -381,11 +384,16 @@ object BiliRoamingApi {
                 "access_key" to accessKey,
             )
             val path = if (area == "th") THAILAND_PATH_PLAYURL else PATH_PLAYURL
+            val signedQuery = try {
+                signQuery(queryString, extraMap)
+            } catch (e: NativeRequestHooks.SigningException) {
+                throw CustomServerException(mapOf("本地签名" to (e.message ?: "B 站原生签名失败")))
+            }
             val uri = Uri.Builder()
                 .scheme("https")
                 .encodedAuthority(host)
                 .encodedPath(path)
-                .encodedQuery(signQuery(queryString, extraMap))
+                .encodedQuery(signedQuery)
                 .toString()
             getContent(uri, mobiApp)?.let {
                 Log.d("use server $area $host for playurl")

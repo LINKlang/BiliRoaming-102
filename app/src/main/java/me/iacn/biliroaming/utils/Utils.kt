@@ -196,7 +196,7 @@ fun signQuery(query: Map<String, String>, extraMap: Map<String, String> = emptyM
     queryMap.putAll(extraMap)
     queryMap.remove("ts")
     queryMap.remove("sign")
-    return instance.libBiliClass?.callStaticMethod(instance.signQueryName(), queryMap).toString()
+    return instance.signRequest(queryMap)
 }
 
 @SuppressLint("DiscouragedApi")
