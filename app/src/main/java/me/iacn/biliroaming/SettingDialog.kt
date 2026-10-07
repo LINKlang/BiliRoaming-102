@@ -42,6 +42,7 @@ import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.hook.JsonHook
 import me.iacn.biliroaming.hook.SplashHook
 import me.iacn.biliroaming.utils.*
+import me.iacn.biliroaming.network.ResolverConfig
 import me.iacn.biliroaming.utils.UposReplaceHelper.isLocatedCn
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -492,6 +493,7 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
 
         private fun onCustomServerClick(): Boolean {
             AlertDialog.Builder(activity).run {
+                val modern = prefs.getBoolean(ResolverConfig.ENABLE_KEY, false)
                 val view = context.inflateLayout(R.layout.customize_backup_dialog)
                 val editTexts = arrayOf(
                     view.findViewById<EditText>(R.id.cn_server),
@@ -499,27 +501,38 @@ class SettingDialog(context: Context) : AlertDialog.Builder(context) {
                     view.findViewById(R.id.tw_server),
                     view.findViewById(R.id.th_server)
                 )
-                editTexts.forEach { it.setText(prefs.getString(it.tag.toString(), "")) }
-                setTitle("设置解析服务器")
-                setView(view)
-                setPositiveButton(android.R.string.ok) { _, _ ->
-                    editTexts.forEach {
-                        val host = it.text.toString()
-                        if (host.isNotEmpty())
-                            prefs.edit().putString(
-                                it.tag.toString(),
-                                host.replace(Regex("^https?://"), "")
-                            ).apply()
-                        else
-                            prefs.edit().remove(it.tag.toString()).apply()
-                    }
+                fun key(edit: EditText) = ResolverConfig.serverKey(edit.tag.toString().substringBefore("_server"), modern)
+                editTexts.forEach {
+                    it.setText(prefs.getString(key(it), ""))
+                    if (modern) it.hint = "域名或 HTTP(S) 地址"
                 }
-                setNegativeButton("获取公共解析服务器") { _, _ ->
+                setTitle(if (modern) "设置新版解析服务器" else "设置解析服务器")
+                setView(view)
+                setPositiveButton(android.R.string.ok, null)
+                if (!modern) setNegativeButton("获取公共解析服务器") { _, _ ->
                     val uri = Uri.parse(XposedInit.moduleRes.getString(R.string.server_url))
                     val intent = Intent(Intent.ACTION_VIEW, uri)
                     startActivity(intent)
                 }
-                show()
+                else setNegativeButton(android.R.string.cancel, null)
+                val dialog = create()
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val values = try { editTexts.associateWith {
+                            val text = it.text.toString()
+                            if (modern) ResolverConfig.normalizeAddress(text) else text.replace(Regex("^https?://"), "")
+                        } } catch (_: IllegalArgumentException) {
+                            Log.toast("请输入有效 HTTP(S) 服务器地址", force = true)
+                            return@setOnClickListener
+                        }
+                        prefs.edit().apply {
+                            values.forEach { (edit, value) -> if (value.isEmpty()) remove(key(edit)) else putString(key(edit), value) }
+                            apply()
+                        }
+                        dialog.dismiss()
+                    }
+                }
+                dialog.show()
             }
             return true
         }

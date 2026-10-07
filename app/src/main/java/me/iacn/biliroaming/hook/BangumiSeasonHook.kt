@@ -20,6 +20,8 @@ import me.iacn.biliroaming.Constant.TYPE_EPISODE_ID
 import me.iacn.biliroaming.Constant.TYPE_SEASON_ID
 import me.iacn.biliroaming.network.BiliRoamingApi
 import me.iacn.biliroaming.network.BiliRoamingApi.getAreaSearchBangumi
+import me.iacn.biliroaming.network.ResolverSettings
+import me.iacn.biliroaming.network.ResolverData
 import me.iacn.biliroaming.network.BiliRoamingApi.getContent
 import me.iacn.biliroaming.network.BiliRoamingApi.getSeason
 import me.iacn.biliroaming.network.BiliRoamingApi.getSpace
@@ -460,14 +462,18 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 val area = areaType.area
                 val handler = chain.args[1]!!
                 MainScope().launch(Dispatchers.IO) {
-                    val result = retrieveAreaSearchV3(request, area, type)
-                    if (result != null) {
-                        val newRes = searchByTypeRespClass
-                            .callStaticMethod("parseFrom", result.toByteArray())
-                        handler.callMethod("onNext", newRes)
-                        handler.callMethod("onCompleted")
-                    } else {
-                        handler.callMethod("onError", null)
+                    try {
+                        val result = retrieveAreaSearchV3(request, area, type)
+                        if (result != null) {
+                            val newRes = searchByTypeRespClass.callStaticMethod("parseFrom", result.toByteArray())
+                            handler.callMethod("onNext", newRes)
+                            handler.callMethod("onCompleted")
+                        } else handler.callMethod("onError", IllegalStateException("番剧解析请求失败"))
+                    } catch (_: kotlinx.coroutines.CancellationException) {
+                        // A refreshed query owns the UI now; do not deliver the older response.
+                    } catch (e: Exception) {
+                        Log.w("番剧搜索响应处理失败（${e.javaClass.simpleName}）")
+                        handler.callMethodOrNull("onError", IllegalStateException("番剧解析响应无效"))
                     }
                 }
                 null
@@ -489,9 +495,9 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             XposedInit.country.get(5L, TimeUnit.SECONDS)
         }
         for (area in AREA_TYPES) {
-            if (area.value.area == currentArea)
+            if (!ResolverSettings.current.modern && area.value.area == currentArea)
                 continue
-            if (!sPrefs.getString(area.value.area + "_server", null).isNullOrBlank() &&
+            if (ResolverSettings.current.server(area.value.area) != null &&
                 sPrefs.getBoolean("search_area_" + area.value.typeStr, false)
             ) {
                 val nav = searchNav {
@@ -513,7 +519,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
     private fun Class<*>.reconstructPageType() {
         val pageArray = getStaticObjectFieldAs<Array<Any>>("\$VALUES")
         val extra = AREA_TYPES.mapNotNull { area ->
-            sPrefs.getString(area.value.area + "_server", null)
+            ResolverSettings.current.server(area.value.area)
                 .takeUnless { it.isNullOrBlank() }?.run {
                     new(
                         "PAGE_" + area.value.typeStr.uppercase(Locale.getDefault()), 4,
@@ -669,7 +675,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
 
         val pages = newData.optInt("pages")
-        var page = pn.toIntOrNull() ?: 1
+        var page = if (ResolverSettings.current.modern) newData.optInt("page", 1) else pn.toIntOrNull() ?: 1
         val response = searchByTypeResponse {
             this.pages = pages
             this.keyword = keyword
@@ -678,7 +684,11 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     json.remove("follow_button")
                 items += searchItem { reconstructFrom(json) }
             }
-            if (page < pages)
+            if (ResolverSettings.current.modern) {
+                newData.optString("resolver_next_page").takeIf { it.isNotEmpty() }?.let {
+                    pagination = paginationReply { next = it }
+                }
+            } else if (page < pages)
                 pagination = paginationReply { next = (++page).toString() }
         }
         return response
@@ -776,9 +786,9 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 XposedInit.country.get(5L, TimeUnit.SECONDS)
             }
             for (area in AREA_TYPES) {
-                if (area.value.area == currentArea)
+                if (!ResolverSettings.current.modern && area.value.area == currentArea)
                     continue
-                if (!sPrefs.getString(area.value.area + "_server", null).isNullOrBlank() &&
+                if (ResolverSettings.current.server(area.value.area) != null &&
                     sPrefs.getBoolean("search_area_" + area.value.typeStr, false)
                 ) {
                     searchAllResultNavInfoClass?.new()?.run {
@@ -823,8 +833,11 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
             Log.toast("发现区域限制番剧，尝试解锁……")
             Log.d("Info: $lastSeasonInfo")
+            val detailInfo = if (ResolverSettings.current.modern) url?.let { Uri.parse(it) }.let {
+                mapOf("season_id" to it?.getQueryParameter("season_id"), "ep_id" to it?.getQueryParameter("ep_id"))
+            } else lastSeasonInfo
             val (newCode, newJsonResult) = getSeason(
-                lastSeasonInfo,
+                detailInfo,
                 jsonResult
             )?.toJSONObject()?.let {
                 it.optInt("code", FAIL_CODE) to it.optJSONObject("result")
@@ -840,9 +853,11 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                             lastSeasonInfo["allow_comment"] = "0"
                         }
                     }?.optInt("watch_platform")?.toString()
-                for (episode in newJsonResult?.optJSONArray("episodes").orEmpty()) {
+                val mappedEpisodes = if (ResolverSettings.current.modern && newJsonResult != null) ResolverData.episodes(newJsonResult)
+                    else newJsonResult?.optJSONArray("episodes").orEmpty().asSequence<JSONObject>().toList()
+                for (episode in mappedEpisodes) {
                     if (episode.has("cid") && episode.has("id")) {
-                        val cid = episode.optInt("cid").toString()
+                        val cid = episode.optLong("cid").toString()
                         val epId = episode.optInt("id").toString()
                         lastSeasonInfo[cid] = epId
                         lastSeasonInfo["ep_ids"] = lastSeasonInfo["ep_ids"]?.let { "$it;$epId" }
@@ -1485,7 +1500,7 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                                 }
                             }.let { episodes.add(it) }
                             if (episode.has("cid") && episode.has("id")) {
-                                val cid = episode.optInt("cid").toString()
+                                val cid = episode.optLong("cid").toString()
                                 val epId = episode.optInt("id").toString()
                                 lastSeasonInfo[cid] = epId
                                 lastSeasonInfo["ep_ids"] =
@@ -1496,6 +1511,8 @@ class BangumiSeasonHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             }
             // episodes
             seasonInfo.optJSONArray("modules")?.iterator()?.forEach { module ->
+                if (ResolverSettings.current.modern && module.optJSONObject("data")?.optJSONArray("episodes") == null)
+                    return@forEach
                 val style = module.optString("style")
                 if (style == "positive") {
                     modules += module {

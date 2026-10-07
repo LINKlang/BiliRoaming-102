@@ -15,6 +15,13 @@
 
         <SwitchPreference
             android:dependency="main_func"
+            android:key="use_new_resolver_protocol"
+            android:defaultValue="false"
+            android:title="@string/new_resolver_title"
+            android:summary="@string/new_resolver_summary" />
+
+        <SwitchPreference
+            android:dependency="main_func"
             android:key="allow_download"
             android:summary="@string/allow_download_summary"
             android:title="@string/allow_download_title" />

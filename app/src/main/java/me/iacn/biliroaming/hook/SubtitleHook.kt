@@ -18,6 +18,7 @@ import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.hook.BangumiSeasonHook.Companion.lastSeasonInfo
 import me.iacn.biliroaming.hook.ProtoBufHook.Companion.removeCmdDms
 import me.iacn.biliroaming.network.BiliRoamingApi
+import me.iacn.biliroaming.network.ResolverSettings
 import me.iacn.biliroaming.utils.*
 import org.json.JSONArray
 import java.io.File
@@ -166,7 +167,7 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                     dmViewReply?.removeCmdDms()
                 }
                 if (mainFunc || generateSubtitle) {
-                    dmViewReply.hookSubtitleList(dmViewReq)
+                    dmViewReply.hookSubtitleList(dmViewReq, instance.dmViewReplyClass)
                 } else null
             }
             chain.proceed(args)
@@ -327,54 +328,57 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             instance.dmViewReqClass,
         ) { chain ->
             val result = chain.proceed()
-            result.hookSubtitleList(chain.args[0]!!) ?: result
+            result.hookSubtitleList(chain.args[0]!!, (chain.executable as? Method)?.returnType) ?: result
         }
 
-        if (!generateSubtitle) return
+        if (!generateSubtitle && !ResolverSettings.current.modern) return
         instance.biliCallClass?.hookMethod(
             instance.setParser(), instance.parserClass
         ) { chain ->
             val url = chain.thisObject!!.getObjectField(instance.biliCallRequestField())
                 ?.getObjectField(instance.urlField())?.toString()
-            if (url?.contains("zh_converter=t2cn") != true)
+            val convertChinese = generateSubtitle && url?.contains("zh_converter=t2cn") == true
+            val resolverSubtitle = url != null && ResolverSettings.current.modern && ResolverSubtitle.recognizes(url)
+            if (!convertChinese && !resolverSubtitle)
                 return@hookMethod chain.proceed()
+            val mediaType = instance.mediaTypeClass?.callStaticMethodOrNull(
+                instance.get(), "application/json; charset=UTF-8"
+            ) ?: return@hookMethod chain.proceed()
+            val bodyFactory = instance.responseBodyClass?.declaredMethods?.firstOrNull {
+                it.name == instance.create() && it.isStatic && it.parameterTypes.size == 2 &&
+                    it.parameterTypes[0].isInstance(mediaType) && it.parameterTypes[1] == String::class.java
+            }?.apply { isAccessible = true } ?: return@hookMethod chain.proceed()
             val parser = chain.args[0]!!
             val args = chain.args.toTypedArray()
             args[0] = Proxy.newProxyInstance(
                 parser.javaClass.classLoader,
                 arrayOf(instance.parserClass)
             ) { _, m, args ->
-                val dictReady = if (!SubtitleHelper.dictExist) {
+                if (args.isNullOrEmpty() || instance.responseBodyClass?.isInstance(args[0]) != true)
+                    return@newProxyInstance m(parser, *(args ?: emptyArray()))
+                val dictReady = if (convertChinese && !SubtitleHelper.dictExist) {
                     SubtitleHelper.downloadDict()
                 } else true
                 val converted = if (dictReady) {
                     runCatching {
                         val responseText = args[0].callMethodAs<String>(instance.string())
-                        SubtitleHelper.convert(responseText)
+                        val json = if (resolverSubtitle) ResolverSubtitle.toJson(responseText) else responseText
+                        if (convertChinese) SubtitleHelper.convert(json) else json
                     }.onFailure {
                         Log.e(it)
                     }.getOrNull()
                         ?: SubtitleHelper.errorResponse(XposedInit.moduleRes.getString(R.string.subtitle_convert_failed))
                 } else SubtitleHelper.errorResponse(XposedInit.moduleRes.getString(R.string.subtitle_dict_download_failed))
 
-                val mediaType = instance.mediaTypeClass
-                    ?.callStaticMethod(
-                        instance.get(),
-                        "application/json; charset=UTF-8"
-                    ) ?: return@newProxyInstance m(parser, *args)
-                val responseBody = instance.responseBodyClass
-                    ?.callStaticMethod(
-                        instance.create(),
-                        mediaType,
-                        converted
-                    ) ?: return@newProxyInstance m(parser, *args)
+                val responseBody = bodyFactory.invoke(null, mediaType, converted)
+                    ?: return@newProxyInstance m(parser, *args)
                 m(parser, responseBody)
             }
             chain.proceed(args)
         }
     }
 
-    private fun Any?.hookSubtitleList(originalReq: Any): Any? {
+    private fun Any?.hookSubtitleList(originalReq: Any, replyClass: Class<*>?): Any? {
         val originalReply = this
         val parseDmViewReply = { r: Any? ->
             r?.let { DmViewReply.parseFrom(it.callMethodAs<ByteArray>("toByteArray")) }
@@ -382,14 +386,22 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
 
         val extraSubtitles = mutableListOf<SubtitleItem>()
         val oid = originalReq.callMethod("getOid").toString()
-        val tryThailand = lastSeasonInfo.containsKey(oid) && ((
+        val tryThailand = !ResolverSettings.current.modern && lastSeasonInfo.containsKey(oid) && ((
                 lastSeasonInfo.containsKey("area")
                         && lastSeasonInfo["area"] == "th") ||
                 (lastSeasonInfo.containsKey("watch_platform")
                         && lastSeasonInfo["watch_platform"] == "1"
                         && (originalReply == null || originalReply.callMethod("getSubtitle")
                     ?.callMethod("getSubtitlesCount") == 0)))
-        if (mainFunc && tryThailand) {
+        if (mainFunc && ResolverSettings.current.modern) {
+            val originalCount = parseDmViewReply(originalReply)?.subtitle?.subtitlesCount ?: 0
+            if (originalCount == 0) {
+                val pid = originalReq.callMethodOrNull("getPid")?.toString()?.toLongOrNull() ?: 0
+                val subtitles = BiliRoamingApi.getResolverSubtitles(oid.toLongOrNull() ?: 0, pid)
+                for (item in subtitles) ResolverSubtitle.register(item.optString("url"))
+                extraSubtitles += subtitles.toSubtitles()
+            }
+        } else if (mainFunc && tryThailand) {
             val subtitles = if (lastSeasonInfo.containsKey("sb$oid")) {
                 JSONArray(lastSeasonInfo["sb$oid"])
             } else {
@@ -446,15 +458,14 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
         }
 
         if (extraSubtitles.isNotEmpty()) {
-            val newRes = (dmViewReply ?: parseDmViewReply(originalReply)
-            ?: dmViewReply {}).copy {
-                subtitle = subtitle.copy {
-                    subtitles += extraSubtitles
+            val newRes = ResolverSubtitle.merge(dmViewReply ?: parseDmViewReply(originalReply)
+                ?: dmViewReply {}, extraSubtitles).copy {
+                if (tryThailand) {
+                    d = true
+                    inputPlaceHolder = "泰区不支持"
                 }
-                d = tryThailand
-                inputPlaceHolder = "泰区不支持"
             }
-            return originalReply?.javaClass?.callStaticMethod("parseFrom", newRes.toByteArray())
+            return (originalReply?.javaClass ?: replyClass)?.callStaticMethod("parseFrom", newRes.toByteArray())
         }
 
         return null
@@ -469,6 +480,7 @@ class SubtitleHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 subtitleUrl = subtitle.optString("url")
                 lan = subtitle.optString("key")
                 lanDoc = subtitle.optString("title")
+                type = subtitle.optInt("type")
             }.let { subList.add(it) }
         }
         return subList

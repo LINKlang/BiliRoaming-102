@@ -1231,7 +1231,7 @@ message Device {
 }
 
 message DmViewReq {
-  optional int32 pid = 0x1;
+  optional int64 pid = 0x1;
   optional int64 oid = 0x2;
   optional int32 type = 0x3;
   optional string spmid = 0x4;

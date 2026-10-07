@@ -5,6 +5,7 @@ import com.google.protobuf.any
 import me.iacn.biliroaming.*
 import me.iacn.biliroaming.BiliBiliPackage.Companion.instance
 import me.iacn.biliroaming.hook.BangumiSeasonHook.Companion.lastSeasonInfo
+import me.iacn.biliroaming.network.ResolverSettings
 import me.iacn.biliroaming.network.BiliRoamingApi.CustomServerException
 import me.iacn.biliroaming.network.BiliRoamingApi.getPlayUrl
 import me.iacn.biliroaming.network.BiliRoamingApi.getSeason
@@ -725,8 +726,12 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             appendQueryParameter("cid", req.cid.let {
                 if (it != 0L) it else episodeInfo?.callMethodOrNullAs<Long>("getCid") ?: 0
             }.let {
-                if (it != 0L) it else thaiEp.value.optLong("id")
+                if (it != 0L) it else if (ResolverSettings.current.modern) thaiEp.value.optLong("cid") else thaiEp.value.optLong("id")
             }.toString())
+            if (ResolverSettings.current.modern) {
+                appendQueryParameter("aid", (episodeInfo?.callMethodOrNullAs<Long>("getAid") ?: 0L).toString())
+                appendQueryParameter("season_id", req.seasonId.toString())
+            }
             appendQueryParameter("qn", req.qn.toString())
             appendQueryParameter("fnver", req.fnver.toString())
             appendQueryParameter("fnval", req.fnval.toString())
@@ -752,8 +757,12 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             appendQueryParameter("cid", req.vod.cid.let {
                 if (it != 0L) it else episodeInfo.cid
             }.let {
-                if (it != 0L) it else thaiEp.value.optLong("id")
+                if (it != 0L) it else if (ResolverSettings.current.modern) thaiEp.value.optLong("cid") else thaiEp.value.optLong("id")
             }.toString())
+            if (ResolverSettings.current.modern) {
+                appendQueryParameter("aid", (req.vod.aid.takeIf { it > 0 } ?: episodeInfo.aid).toString())
+                appendQueryParameter("season_id", (req.extraContentMap["season_id"] ?: episodeInfo.seasonInfo.seasonId.toString()))
+            }
             appendQueryParameter("qn", req.vod.qn.toString())
             appendQueryParameter("fnver", req.vod.fnver.toString())
             appendQueryParameter("fnval", req.vod.fnval.toString())
@@ -827,11 +836,11 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 val supportedConf = arcConf { isSupport = true }
                 supportedPlayArcIndices.forEach { arcConf[it] = supportedConf }
             }
-            if (!hasPlayArc()) {
-                playArc = playArc {
+            if (!hasPlayArc() || (ResolverSettings.current.modern && (playArc.cid == 0L || playArc.aid == 0L))) {
+                playArc = playArc.copy {
                     val episode = thaiEp.value
-                    aid = episode.optLong("aid")
-                    cid = episode.optLong("cid")
+                    if (aid == 0L) aid = episode.optLong("aid")
+                    if (cid == 0L) cid = episode.optLong("cid")
                     videoType = BizType.BIZ_TYPE_PGC
                     episode.optJSONObject("dimension")?.run {
                         dimension = dimension {
@@ -855,6 +864,11 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
             business = business.copy {
                 isPreview = jsonContent.optInt("is_preview", 0) == 1
                 episodeInfo = episodeInfo.copy {
+                    if (ResolverSettings.current.modern && (cid == 0L || aid == 0L)) {
+                        val episode = thaiEp.value
+                        if (cid == 0L) cid = episode.optLong("cid")
+                        if (aid == 0L) aid = episode.optLong("aid")
+                    }
                     seasonInfo = seasonInfo.copy {
                         rights = seasonRights {
                             canWatch = 1
@@ -870,8 +884,8 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                 isPreview = jsonContent.optInt("is_preview", 0) == 1
                 episodeInfo = episodeInfo {
                     epId = episode.optInt("id")
-                    cid = episode.optLong("id")
-                    aid = season.optLong("season_id")
+                    cid = if (ResolverSettings.current.modern) episode.optLong("cid") else episode.optLong("id")
+                    aid = if (ResolverSettings.current.modern) episode.optLong("aid") else season.optLong("season_id")
                     epStatus = episode.optLong("status")
                     cover = episode.optString("cover")
                     title = episode.optString("title")
@@ -945,7 +959,7 @@ class BangumiPlayUrlHook(classLoader: ClassLoader) : BaseHook(classLoader) {
                         }
                         // Not knowing the extract matching,
                         // just use the largest id
-                        audioId = audioIds.maxOrNull() ?: audioIds[0]
+                        audioId = audioIds.maxOrNull() ?: 0
                         noRexcode = optInt("no_rexcode") != 0
                     }
                     streamInfo = streamInfo {

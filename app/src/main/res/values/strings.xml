@@ -74,6 +74,8 @@
     <string name="music_notification_title">原生音乐通知样式</string>
     <string name="music_notification_summary">强制音乐通知栏为原生样式</string>
     <string name="custom_server_title">设置解析服务器</string>
+    <string name="new_resolver_title">使用新版解析协议</string>
+    <string name="new_resolver_summary">使用新版 App 解析接口，服务器地址独立设置；保存后重启客户端生效</string>
     <string name="custom_server_summary">使用设置的服务器解析区域限制番剧的播放地址；如不知如何设置，请查看帮助文档</string>
     <string name="drawer_title">移动我的页面到侧边栏</string>
     <string name="drawer_summary">移动后，可以点击首页的头像或者在空白地方左划打开侧边栏\n关闭时，需要重启两次客户端才能复原。如果无法还原，请重启手机。</string>

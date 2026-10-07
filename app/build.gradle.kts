@@ -167,6 +167,7 @@ dependencies {
     implementation(libs.cxx)
     implementation(libs.okhttp)
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
 
 fun adbPath(): String {

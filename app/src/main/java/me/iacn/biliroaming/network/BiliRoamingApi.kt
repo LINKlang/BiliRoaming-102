@@ -31,6 +31,20 @@ import java.util.zip.InflaterInputStream
  * Email i@iacn.me
  */
 object BiliRoamingApi {
+    private val resolverConfig get() = ResolverSettings.current
+    private val newResolver by lazy {
+        NewResolverClient(resolverConfig, credentials = { area ->
+            val custom = sPrefs.getString("${area}_server_accessKey", null)
+            val key = instance.getCustomizeAccessKey("${area}_server").orEmpty()
+            val mid = if (custom.isNullOrBlank()) instance.biliAccounts?.callMethodOrNullAs<Long>("mid") ?: 0L else 0L
+            key to mid
+        }, request = { area, path, query, headers ->
+            val signed = signQuery(query)
+            getContent(resolverConfig.endpoint(area, path) + "?" + signed,
+                headers = headers, timeout = if (area == "th" && path.endsWith("search/type")) 45000 else 20000,
+                logDetails = false)
+        })
+    }
     private const val BILI_SEASON_URL = "api.bilibili.com/pgc/view/v2/app/season"
     private const val BILI_SEARCH_URL = "/x/v2/search/type"
     private const val BILIPLUS_VIEW_URL = "www.biliplus.com/api/view"
@@ -61,6 +75,12 @@ object BiliRoamingApi {
 
     @JvmStatic
     fun getSeason(info: Map<String, String?>, season: JSONObject?): String? {
+        if (resolverConfig.modern) return try {
+            newResolver.season(info, season)
+        } catch (e: NativeRequestHooks.SigningException) {
+            Log.toast(e.message ?: "B 站原生签名失败")
+            null
+        }
         val seasonId = info.getOrDefault("season_id", null)?.toInt() ?: return null
         val cache = seasonCache.get()
         val cacheTuple = if (seasonId != 0) {
@@ -188,6 +208,14 @@ object BiliRoamingApi {
 
     @JvmStatic
     fun getAreaSearchBangumi(query: Map<String, String>, area: String, type: String): String? {
+        if (resolverConfig.modern) return try {
+            newResolver.search(query, area, type)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: NativeRequestHooks.SigningException) {
+            Log.toast(e.message ?: "B 站原生签名失败"); null
+        } catch (e: Exception) {
+            Log.toast("新版番剧搜索失败（${e.javaClass.simpleName}）"); null
+        }
         if (area == "th") {
             return getThailandSearchBangumi(query, type)
         }
@@ -318,6 +346,32 @@ object BiliRoamingApi {
     @JvmStatic
     fun getPlayUrl(queryString: String?, priorityArea: Array<String>? = null): String? {
         queryString ?: return null
+        if (resolverConfig.modern) {
+            val query = Uri.parse("https://localhost/?$queryString").run {
+                queryParameterNames.associateWith { getQueryParameter(it).orEmpty() }
+            }
+            val id = query["season_id"]?.takeUnless { it.isEmpty() || it == "0" }
+                ?: "ep${query["ep_id"].orEmpty()}"
+            val cached = sCaches.getString(resolverConfig.cacheKey(id), null)
+            val title = if (lastSeasonInfo["ep_ids"]?.split(';')?.contains(query["ep_id"]) == true)
+                lastSeasonInfo["title"].orEmpty() else ""
+            val titleAreas = buildList {
+                if (title.contains(Regex("僅.*台"))) add("tw")
+                if (title.contains(Regex("僅.*港"))) add("hk")
+                if (title.contains("东南亚") || title.contains("其他")) add("th")
+            }
+            val priority = listOfNotNull(cached) + priorityArea.orEmpty().reversed() + titleAreas.reversed()
+            val (play, errors) = try { newResolver.play(query, priority) }
+            catch (e: NativeRequestHooks.SigningException) {
+                throw CustomServerException(mapOf("本地签名" to (e.message ?: "B 站原生签名失败")))
+            }
+            if (play == null) throw CustomServerException(errors.ifEmpty { mapOf("配置" to "未设置新版解析服务器") })
+            lastSeasonInfo["area"] = play.area
+            lastSeasonInfo["epid"] = query["ep_id"]
+            sCaches.edit().putString(resolverConfig.cacheKey(id), play.area)
+                .putString(resolverConfig.cacheKey("ep${query["ep_id"].orEmpty()}"), play.area).apply()
+            return play.video.toString()
+        }
         val twUrl = sPrefs.getString("tw_server", null)
         val hkUrl = sPrefs.getString("hk_server", null)
         val cnUrl = sPrefs.getString("cn_server", null)
@@ -606,8 +660,9 @@ object BiliRoamingApi {
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun getContent(urlString: String, mobiApp: String = platform): String? {
-        val timeout = 10000
+    fun getContent(urlString: String, mobiApp: String = platform,
+                   headers: Map<String, String> = emptyMap(), timeout: Int = 10000,
+                   logDetails: Boolean = true): String? {
         return try {
             // Work around for android 7
             if (Build.VERSION.SDK_INT == Build.VERSION_CODES.N &&
@@ -641,7 +696,7 @@ object BiliRoamingApi {
                             "x-from-biliroaming" to BuildConfig.VERSION_NAME,
                             "platform-from-biliroaming" to mobiApp,
                             "Build" to BuildConfig.VERSION_CODE.toString()
-                        )
+                        ) + headers
                     )
                 }
                 try {
@@ -666,6 +721,7 @@ object BiliRoamingApi {
                     "${if (instance.brotliInputStreamClass != null) "br," else ""}gzip,deflate"
                 )
                 connection.setRequestProperty("platform-from-biliroaming", mobiApp)
+                headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
                 connection.connect()
                 if (connection.responseCode == HttpURLConnection.HTTP_OK) {
                     val inputStream = connection.inputStream
@@ -677,17 +733,34 @@ object BiliRoamingApi {
                             else -> inputStream
                         }
                     )
-                } else null
+                } else {
+                    if (!logDetails) Log.w("解析请求 ${URL(urlString).path}: HTTP ${connection.responseCode}")
+                    null
+                }
             }
 
         } catch (e: Throwable) {
-            Log.e("getContent error: $e with url $urlString")
-            Log.e(e)
+            if (logDetails) {
+                Log.e("getContent error: $e with url $urlString")
+                Log.e(e)
+            } else Log.w("解析请求失败（${e.javaClass.simpleName}）")
             null
         }?.also {
-            Log.d("getContent url: $urlString mobiApp: $mobiApp")
-            Log.d("getContent result: $it")
+            if (logDetails) {
+                Log.d("getContent url: $urlString mobiApp: $mobiApp")
+                Log.d("getContent result: $it")
+            } else {
+                val code = runCatching { JSONObject(it).optInt("code", -1) }.getOrNull()
+                Log.d("解析请求 ${URL(urlString).path}: code=$code")
+            }
         }
+    }
+
+    fun getResolverSubtitles(cid: Long, pid: Long): JSONArray = try {
+        newResolver.subtitles(cid, pid)
+    } catch (e: Exception) {
+        Log.w("新版字幕请求失败（${e.javaClass.simpleName}）")
+        JSONArray()
     }
 
 }
